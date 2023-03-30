@@ -1,0 +1,261 @@
+---
+title: "Practice Exam 2"
+author: "2017311974 진수정"
+date: '2021 5 25 '
+output: word_document
+---
+
+```{r,warning = F,message = F}
+setwd("C:/Users/SJ/OneDrive/바탕 화면/시계열/시험2")
+rm(list = ls())
+library(itsmr)
+library(forecast)
+library(MASS)
+library(glmnet)
+library(tseries)
+library(aTSA)
+library(tidyverse)
+library(zoo)
+source("TS-library.R")
+load("Alasso.Rdata")
+```
+
+```{r}
+data = read.csv("practice2-2021sp.csv")
+data = zoo(data[,2],seq(from = as.Date("2005-01-01"),
+                        to = as.Date("2010-06-16"),by = 1))
+```
+
+### (a) Time plot, correlograms (ACF) and discuss key features of the data.  
+```{r}
+layout(matrix(c(1,1,2,2),2,2,byrow = T))
+plot.ts(data)
+acf(data,lag = 50)
+```
+  
+(1) From time plot, we can observe some linear or quadratic decreasing pattern.  
+(2) From correlograms, SACFs are very slowly decaying.  
+(3) At the end of the time period, there are some outliers.  
+  
+### (b) Is it stationary? Include your evidence.  
+  
+From (1) and (2), the given data have some deterministic trend. Thus, the data is not stationary, and we need to detrend.  
+  
+### (c) Find (your) best "regression + stationary errors" model. You need to include reasonings for your selection.  
+```{r}
+n = length(data)
+const = rep(1,n)
+time = 1:n
+time2 = time^2
+
+out.lm1 = lm(data ~ time)
+summary(out.lm1)
+out.lm2 = lm(data ~ time + time2)
+summary(out.lm2)
+```
+```{r}
+layout(matrix(c(1,2,1,2),2,2,byrow = T))
+plot.ts(data)
+lines(out.lm1$fitted,col = 'red')
+plot.ts(data)
+lines(out.lm2$fitted,col = 'blue')
+```
+  
+Since linear model is enough, proceed with the model.   
+
+```{r}
+par(mfrow = c(2,2))
+plot(out.lm1)
+```
+  
+From residual plot and qqplot, normal assumptions seem to be satisfied.  
+
+```{r}
+test(residuals(out.lm2))
+```
+  
+All the formal tests are rejected. Since the residual is not iid, we need to model the error structure.  
+From correlograms, ACFs are decaying and PACF(1), PACF(2), PACF(8), PACF(9) are significant. Thus, sparse AR(9) seems to be fine.  
+
+```{r}
+n = length(data)
+const = rep(1,n)
+time = 1:n
+time2 = time^2
+xreg = cbind(const,time,time2)
+
+# AR(9)
+fit.9 = arima(data,order = c(9,0,0),
+              xreg = xreg,include.mean = F)
+summary(fit.9)
+```
+```{r}
+2 * (1 - pnorm(abs(fit.9$coef / sqrt(diag(fit.9$var.coef)))))
+```
+```{r}
+fit.9 = arima(data,order = c(9,0,0),
+              xreg = xreg,include.mean = F,
+              fixed = c(NA,NA,0,0,0,NA,NA,NA,NA,NA,NA),
+              transform.pars = F)
+summary(fit.9)
+```
+```{r}
+test(residuals(fit.9))
+```
+  
+Formal test results looks fine. Also, there remains no obvious pattern in residual plot and correlograms. Thus, "linear model + AR(9) (constrained)" model is selected as the best regression + stationary error model.  
+    
+### (d) Find (your) best SARIMA model. You need to include reasonings for your selection.  
+  
+Since the given data has deterministic trend, try differencing first.  
+```{r}
+# 1st order differencing
+dat1 = diff(data,1)
+layout(matrix(c(1,1,2,3),2,2,byrow = T))
+plot.ts(dat1)
+acf(dat1,lag = 50)
+pacf(dat1,lag = 50)
+```
+```{r}
+# 2nd order differencing
+dat2 = diff(data,2)
+layout(matrix(c(1,1,2,3),2,2,byrow = T))
+plot.ts(dat2)
+acf(dat2,lag = 50)
+pacf(dat2,lag = 50)
+```
+  
+Trend is disappeared. Since there is no significant improvement between order 1 and 2, first order differencing seems enough.  
+Also, We can observe that PACF(1) and PACF(7) is valid. Since the given data is daily data, this kind of intra-weekly seasonality is plausible.  
+
+```{r}
+fit.s = arima(data,order = c(1,1,0),
+              seasonal = list(order = c(0,0,1),period = 7))
+summary(fit.s)
+```
+```{r}
+2 * (1 - pnorm(abs(fit.s$coef / sqrt(diag(fit.s$var.coef)))))
+```
+```{r}
+test(residuals(fit.s))
+```
+  
+Since all formal tests are not rejected, the residual is iid. Also, there is no pattern left in residual plot, correlogram, and qqplot looks fine. Thus, SARIMA(1,1,0)(0,0,1) with period 7 is selected as the best model.  
+  
+### (e) Forecast the next 4 quarters with 95% prediction interval for both models (c) and (d) you selected. Use two decimal places (ex, 1.23) in your report. Report them as the table in the below:
+```{R}
+# Final model
+fit.9 = Arima(data,order = c(9,0,0),
+              xreg = xreg,include.mean = F,
+              fixed = c(NA,NA,0,0,0,NA,NA,NA,NA,NA,NA),
+              transform.pars = F)
+
+fit.s = arima(data,order = c(1,1,0),
+              seasonal = list(order = c(0,0,1),
+                              period = 7))
+
+# newx
+h = 4
+const = rep(1,h)
+time = (n+1):(n+h)
+newx = cbind(const,time)
+
+# prediction
+prediction = data.frame(
+  model.c = rep(NA,4),
+  model.c.lower = rep(NA,4),
+  model.c.upper = rep(NA,4),
+  model.d = rep(NA,4),
+  model.d.lower = rep(NA,4),
+  model.d.upper = rep(NA,4)
+)
+
+# Model (c)
+pred.c = forecast::forecast(fit.9,xreg = newx,h = 4)
+prediction$model.c = pred.c$mean
+prediction$model.c.lower = pred.c$lower[,2]
+prediction$model.c.upper = pred.c$upper[,2]
+
+# Model (d)
+pred.d = forecast::forecast(fit.s,h = 4)
+prediction$model.d = pred.d$mean
+prediction$model.d.lower = pred.d$lower[,2]
+prediction$model.d.upper = pred.d$upper[,2]
+
+prediction
+```
+
+
+```{r}
+model_C_PI = paste0('(',round(prediction$model.c.lower,0),',',round(prediction$model.c.upper,0),')')
+model_D_PI = paste0('(',round(prediction$model.d.lower,0),',',round(prediction$model.d.upper,0),')')
+
+tab = data.frame(
+  model_C_point = prediction$model.c,
+  model_C_PI = model_C_PI,
+  model_D_point = prediction$model.d,
+  model_D_PI = model_D_PI
+)
+rownames(tab) = c('Q1','Q2',"Q3","Q4")
+tab = as.data.frame(t(tab))
+tab
+```
+  
+### (f) Which one do you prefer (c) or (d), and why? If you have better model than models in (c) & (d), you can describe your own model here with your rational.  
+```{r,warning = F}
+m = 100; n = length(data)
+N = n - m
+testindex = (N+1):n
+
+# model (c)
+err.c = numeric(m)
+for (i in 1:m) {
+  trainindex = time = 1:(N+i-1)
+  const = rep(1,N+i-1)
+  xreg = cbind(const,time)
+  fit.c = Arima(data[trainindex],order = c(9,0,0),
+              xreg = xreg,include.mean = F,
+              fixed = c(NA,NA,0,0,0,NA,NA,NA,NA,NA,NA),
+              transform.pars = F)
+  time = N+i
+  Xhat = forecast::forecast(fit.c,h = 1,
+                 xreg = cbind(1,time))$mean
+  err.c[i] = (data[N+i] - Xhat)^2
+}
+```
+
+```{r,warning = F}
+# model (d)
+err.d = numeric(m)
+for (i in 1:m) {
+  trainindex = 1:(N+i-1)
+  fit.d = arima(data[trainindex],order = c(1,1,0),
+              seasonal = list(order = c(0,0,1),
+                              period = 7))
+  Xhat = forecast::forecast(fit.d,h = 1)$mean
+  err.d[i] = (data[N+i] - Xhat)^2
+}
+```
+
+```{r}
+comp = data.frame(
+  model_C = c(mean(err.c),fit.9$aic),
+  model_D = c(mean(err.d),fit.s$aic)
+)
+rownames(comp) = c('MSPE','AIC')
+comp
+```
+  
+- We can observe that AIC of model (d) is smaller than AIC of model (c). Also, MSPE of model (d) is smaller than MSPE of model (c). Thus, I prefer model (d).  
+  
+- We can apply smoothing methods like exponential smoothing for forecasting time series data. 
+Also, if we have some relevant variables or generate variables by feature engineering, we may use machine learning models such as random forest and deep learning models like LSTM in time series problem. I think those methods will work quite well and the reason is as follows: Although time series data has some dependency between observations, random forest model is not sensitive to the dependency. Also, since the model is flexible, it will capture some pattern well.  
+
+
+
+
+
+
+
+
+

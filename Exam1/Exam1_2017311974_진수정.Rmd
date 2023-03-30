@@ -1,0 +1,218 @@
+---
+title: "Data Analysis Exam 1"
+author: "2017311974 진수정"
+date: '2021 3 30 '
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r}
+setwd("C:/Users/SJ/OneDrive/바탕 화면/시계열/시험")
+rm(list = ls())
+source("TS-library.R")
+library(aTSA)
+data = scan("2021exam1.txt")
+data = ts(data,start = c(2010,2),freq = 52)
+```
+
+## (a) Time plot, correlograms (ACF) and discuss key features of the data.    
+```{r}
+# Time plot & Correlogram
+par(mfrow = c(1,2))
+plot.ts(data)
+title("Time plot")
+acf2(data)
+title("SACF")
+```
+  
+1. ( increasing Trend ): Time plot shows that there exists (linear or quadratic) increasing trend. Also, slowly decaying and linearly decaying SACFs indicate the existence of trend.  
+2. ( Seasonality with period 52 ): From the fact that the given data is weekly data, it can be easily inferred that there would be seasonality with period 52 (since there are 52 weeks in a year). Some repeated pattern in time plot shows that there exists seasonality.  
+3. ( Outliers ): There are some outliers nearby t = 2010, 2014, 2016, 2019.    
+  
+## (b) Remove any trend or seasonality or both to make the series as stationary if necessary.    
+```{r}
+n = length(data)
+t = 1:n
+x = as.vector(time(data))
+```
+
+To remove both trend and seasonality, we will first try smoothing method (classical decomposition algorithm). Since there are linear or quadratic trend and lag 52 seasonality, assign d = 52 and order = 1 first.  
+```{r}
+# Classical Decomposition (d = 52, order = 1)
+out = classical(data,d = 52,order = 1)
+
+par(mfrow = c(2,2))
+plot.ts(data)
+title("Step 1")
+lines(x,out$m1,col = 'red')
+
+plot.ts(data - out$m1)
+title("Step 2")
+lines(x,out$st,col = 'red')
+
+plot.ts(data - out$st)
+title("Step 3")
+lines(x,out$m,col = 'red')
+
+plot.ts(data)
+title("Final")
+lines(x,out$fit,col = 'red')
+```
+  
+At step 3, linear regression model cannot fully explain the data. Thus, proceed with order = 2.  
+```{r}
+# Classical Decomposition (d = 52, order = 2)
+out = classical(data,d = 52,order = 2)
+
+par(mfrow = c(2,2))
+plot.ts(data)
+title("Step 1")
+lines(x,out$m1,col = 'red')
+
+plot.ts(data - out$m1)
+title("Step 2")
+lines(x,out$st,col = 'red')
+
+plot.ts(data - out$st)
+title("Step 3")
+lines(x,out$m,col = 'red')
+
+plot.ts(data)
+title("Final")
+lines(x,out$fit,col = 'red')
+```
+  
+The above plots show that estimated line fits the data well.  Classical decomposition with d = 52, order = 2 works fine.    
+  
+Next, we will try differencing method to detrend and deseasonalize. First, try seasonal differencing with lag = 52.  
+```{r}
+# Seasonal differencing
+diff52 = diff(data,lag = 52)
+
+par(mfrow = c(1,2))
+plot.ts(diff52)
+title("Seasonal differencing")
+acf2(diff52)
+title("SACF")
+```
+  
+There is linear trend left. Also, slowly decaying and almost linearly decaying SACFs indicate that there remains some trend. To remove trend, try 1st differencing.  
+```{r}
+# 1st differencing
+final_diff = diff(diff52,1)
+
+par(mfrow = c(1,2))
+plot.ts(final_diff)
+title("Final differencing")
+acf2(final_diff)
+title("SACF")
+```
+  
+Since there is no clear trend left, both trend and seasonality are successfully removed. Differencing method works fine.    
+  
+Next, we will try regression method. 
+```{r}
+# Regression
+m1 = floor(n/52)
+m2 = 2*m1
+m3 = 3*m1
+m4 = 4*m1
+
+sinterm1 = sin(m1*2*pi/n*t)
+costerm1 = cos(m1*2*pi/n*t)
+sinterm2 = sin(m2*2*pi/n*t)
+costerm2 = cos(m2*2*pi/n*t)
+sinterm3 = sin(m3*2*pi/n*t)
+costerm3 = cos(m3*2*pi/n*t)
+sinterm4 = sin(m4*2*pi/n*t)
+costerm4 = cos(m4*2*pi/n*t)
+
+step(lm(data ~ 1 + sinterm1 + costerm1 + sinterm2 + costerm2 +
+          sinterm3 + costerm3 + sinterm4 + costerm4 + 
+          x + I(x^2)))
+```
+  
+Based on stepwise selection result, we will use harmonic regression with k = 2, and polynomial regression with order = 2 simultaneously.    
+```{r}
+out.lm = lm(data ~ 1 + x + I(x^2) + sinterm1 + costerm1 +
+              sinterm2 + costerm2)
+summary(out.lm)
+```
+```{r}
+par(mfrow = c(2,2))
+plot(out.lm)
+```
+```{r}
+plot.ts(data)
+title("Regression method")
+lines(x,out.lm$fitted,col = 'red')
+```
+  
+Residuals vs Fitted plot looks fine, and estimated line fits the data well.  
+  
+Then, we need to select the final model among the smoothing, differencing, and regression method.  
+```{r}
+par(mfrow = c(1,2))
+plot.ts(data - out$fit)
+title("Smoothing method")
+
+acf2(data - out$fit)
+title("SACF")
+```
+```{r}
+par(mfrow = c(1,2))
+plot.ts(final_diff)
+title("Differencing method")
+
+acf2(final_diff)
+title("SACF")
+```
+```{r}
+par(mfrow = c(1,2))
+plot.ts(out.lm$residuals)
+title("Regression method")
+
+acf2(out.lm$residuals)
+title("SACF")
+```
+  
+Since some clear pattern still remains in the residual plot of regression method, regression method is not appropriate.  
+Among the residuals obtained by applying the other two methods, the residuals of differencing method seem to be more stable toward mean. Also, for smoothing method, it is needed to follow multistage algorithm to estimate trend and seasonality. However, just simple seasonal/order differencing is enough for differencing method.    
+Thus, for its stability and handy calculation, differencing method is selected as the final model.  
+  
+## (c) Include reasoning why the residuals from the selected model in (b) is stationary. Also, can you claim that the removed series is an IID sequence?    
+```{r}
+# Stationarity
+par(mfrow = c(1,2))
+plot.ts(final_diff)
+title("Residuals")
+
+acf2(final_diff)
+title("SACF")
+```
+  
+There is no clear pattern left in the residual plot, and linearly decaying SACFs is disappeared. Thus, the residuals from the selected model is stationary.  
+```{r}
+# whether IID sequence
+test(final_diff)
+```
+  
+The removed series is not iid. The reason is as follows.  
+1. All the first three tests (Ljung-Box Q, McLeod-Li Q, Turning points T) are rejected, so residuals are not iid.  
+2. Based on SACFs, there is strong positive correlation on small lags. Thus, residuals are correlated.  
+  
+## (d) Write one paragraph summary on your findings about (a)-(c).  
+First, there exists (linear or quadratic) increasing trend and period-52 seasonality in the given data, based on time plot and correlogram. To remove both trend and seasonality, smoothing method, differencing method, and regression method were used. Among them, regression method failed to remove both trend and seasonality. Finally, the model obtained by applying differencing method was selected as the final model. This is because differencing method has handy calculation, and the obtained residuals are more stable toward mean. The residuals from the final model is stationary since it shows no clear pattern. However, based on tests of randomness and SACFs, the residuals are not iid. Thus, it is needed to model the residual structure.   
+  
+## (e) Attach R (or other softwares you used) code you have used in this analysis.  
+
+
+
+
+
+
+
+
+
+
